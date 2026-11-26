@@ -21,7 +21,21 @@ const fontCss = weights
   })
   .join("\n");
 
-const artifact = src.replace("/*FONTS*/", fontCss);
+// app/img/*.jpg 와 app/img/_meta.json (작가, 라이선스, 원본 주소)을 페이지에 내장한다.
+const imgDir = path.join(__dirname, "img");
+const meta = JSON.parse(fs.readFileSync(path.join(imgDir, "_meta.json"), "utf8"));
+const imgData = {};
+for (const [key, m] of Object.entries(meta)) {
+  const file = path.join(imgDir, key + ".jpg");
+  if (!fs.existsSync(file)) continue;
+  imgData[key] = {
+    src: "data:image/jpeg;base64," + fs.readFileSync(file).toString("base64"),
+    artist: m.artist, license: m.license, licenseUrl: m.licenseUrl, page: m.page,
+  };
+}
+const imgJson = JSON.stringify(imgData).replace(/</g, "\\u003c");
+
+const artifact = src.replace("/*FONTS*/", fontCss).replace("/*IMAGES*/{}", imgJson);
 fs.writeFileSync(path.join(__dirname, "index.html"), artifact);
 
 const titleMatch = artifact.match(/<title>[\s\S]*?<\/title>/);
