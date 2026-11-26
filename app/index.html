@@ -429,7 +429,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
     document.getElementById("moreBtn").innerHTML = ic("menu") + "더보기";
     var n = document.getElementById("notice");
     var msg = "";
-    if (state.mode === "sheet") msg = state.sx.role ? "" : "비용 정산은 비밀번호를 입력하면 볼 수 있어요. 나머지는 기본 일정이에요.";
+    if (state.mode === "sheet") msg = (state.sx.role || !state.sx.loaded) ? "" : "비용 정산은 비밀번호를 입력하면 볼 수 있어요. 나머지는 기본 일정이에요.";
     else if (state.standalone) msg = "이 주소에서는 기본 일정만 보여요. 비용 정산과 수정은 공유 링크(Claude 아티팩트)에서 할 수 있어요.";
     else if (state.dbNull) msg = "로그인하면 가족이 수정한 일정과 비용이 보여요. 지금은 기본 일정이에요.";
     else if (state.db && !state.ready && state.timedOut) msg = "공유된 수정 내용을 아직 불러오지 못했어요. 기본 일정을 보여드리고 있어요.";
@@ -517,6 +517,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
   }
   function viewMoney() {
     if (state.mode === "sheet" && !state.sx.role) {
+      if (!state.sx.loaded) return '<div class="card empty">비용을 불러오는 중이에요.</div>';
+      if (!state.sx.error || state.sx.error.indexOf("연결하지") >= 0) {
+        return '<div class="card"><h2>비용 정산</h2><p class="note" style="color:var(--warn)">' + esc(state.sx.error || "불러오지 못했어요.") + '</p><div class="btnrow"><button class="btn" type="button" data-act="sx-refresh">다시 불러오기</button></div></div>';
+      }
       return '<div class="card"><h2>비용 정산</h2><p class="note">비용은 구글 시트에 저장돼요. 가족에게 받은 비밀번호를 입력하면 볼 수 있어요.</p>' +
         (state.sx.error ? '<p class="note" style="color:var(--warn)">' + esc(state.sx.error) + "</p>" : "") +
         '<div class="btnrow"><button class="btn" type="button" data-act="code-open">비밀번호 입력</button></div></div>';
@@ -595,9 +599,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
   function viewMore() {
     var h = "";
     if (state.mode === "sheet") {
-      h += '<div class="card"><h3>구글 시트 연결</h3><p class="muted">' + (state.sx.role === "edit" ? "편집 비밀번호로 로그인했어요." : state.sx.role === "view" ? "보기 비밀번호로 로그인했어요." : "아직 로그인하지 않았어요.") +
-        ' 비밀번호는 이 기기에만 저장돼요.</p><div class="btnrow"><button class="btn ghost sm" type="button" data-act="code-open">' + (state.sx.role ? "비밀번호 바꾸기" : "비밀번호 입력") + "</button>" +
-        (state.sx.code ? '<button class="btn ghost sm" type="button" data-act="code-clear">로그아웃</button>' : "") + "</div></div>";
+      if (state.sx.role && !state.sx.code) {
+        h += '<div class="card"><h3>구글 시트 연결</h3><p class="muted">비용은 구글 시트에 저장돼요. 이 주소를 아는 사람은 누구나 비용을 보고 편집할 수 있어요.</p></div>';
+      } else {
+        h += '<div class="card"><h3>구글 시트 연결</h3><p class="muted">' + (state.sx.role === "edit" ? "편집 비밀번호로 로그인했어요." : state.sx.role === "view" ? "보기 비밀번호로 로그인했어요." : "아직 로그인하지 않았어요.") +
+          ' 비밀번호는 이 기기에만 저장돼요.</p><div class="btnrow"><button class="btn ghost sm" type="button" data-act="code-open">' + (state.sx.role ? "비밀번호 바꾸기" : "비밀번호 입력") + "</button>" +
+          (state.sx.code ? '<button class="btn ghost sm" type="button" data-act="code-clear">로그아웃</button>' : "") + "</div></div>";
+      }
     }
     if (canMoney()) {
       h += '<div class="card"><h3>여행 설정</h3><p class="muted">출발일을 넣으면 상단에 D-day가 보여요.</p><div class="btnrow"><button class="btn ghost sm" type="button" data-act="settings">' + ic("pencil") + "출발일 설정" + (state.settings.startDate ? " (" + esc(state.settings.startDate) + ")" : "") + "</button></div></div>";
@@ -729,8 +737,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
       .then(function (r) { return r.json(); });
   }
   function sxLoad() {
-    if (!state.sx.code) return Promise.resolve();
     return sxCall({ action: "list" }).then(function (j) {
+      state.sx.loaded = true;
       if (j && j.ok) {
         state.sx.role = j.role; state.sx.error = "";
         state.expenses = (j.expenses || []).map(function (e) {
@@ -742,12 +750,16 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
         if (state.sx.role !== "edit") state.edit = false;
       } else {
         state.sx.role = null; state.edit = false;
-        if (j && j.error === "bad_code") { state.sx.error = "비밀번호가 맞지 않아요."; state.sx.code = ""; try { localStorage.removeItem("fuk-code"); } catch (e) {} }
+        if (j && j.error === "bad_code") {
+          state.sx.error = state.sx.code ? "비밀번호가 맞지 않아요." : "이 시트는 비밀번호가 필요해요.";
+          state.sx.code = ""; try { localStorage.removeItem("fuk-code"); } catch (e) {}
+        }
         else state.sx.error = "불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.";
       }
-      var sig = JSON.stringify([state.sx.role, state.sx.error, state.expenses, state.settings]);
+      var sig = JSON.stringify([state.sx.role, state.sx.error, state.sx.loaded, state.expenses, state.settings]);
       if (sig !== state.sx.sig) { state.sx.sig = sig; render(); }
     }, function () {
+      state.sx.loaded = true;
       if (!state.sx.role) { state.sx.error = "구글 시트에 연결하지 못했어요. 인터넷 연결을 확인해 주세요."; render(); }
     });
   }
@@ -761,8 +773,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
     state.mode = "sheet";
     var c = lsGet("fuk-code"); if (c) state.sx.code = c;
     render(); sxLoad();
-    setInterval(function () { if (document.visibilityState === "visible" && state.sx.code && $sheet.hidden) sxLoad(); }, 30000);
-    document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible" && state.sx.code) sxLoad(); });
+    function canPoll() { return document.visibilityState === "visible" && (state.sx.role || state.sx.code); }
+    setInterval(function () { if (canPoll() && $sheet.hidden) sxLoad(); }, 30000);
+    document.addEventListener("visibilitychange", function () { if (canPoll()) sxLoad(); });
   }
   function codeSheet() {
     state.sheet = { kind: "code" };
@@ -800,7 +813,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
     if (act === "code-open") return codeSheet();
     if (act === "sx-refresh") { toast("불러오는 중이에요."); return void sxLoad(); }
     if (act === "code-clear") {
-      state.sx.code = ""; state.sx.role = null; state.sx.error = ""; state.sx.sig = ""; state.expenses = []; state.edit = false;
+      state.sx.code = ""; state.sx.role = null; state.sx.error = "로그아웃했어요. 다시 보려면 비밀번호가 필요해요."; state.sx.sig = ""; state.expenses = []; state.edit = false;
       try { localStorage.removeItem("fuk-code"); } catch (e) {}
       toast("로그아웃했어요."); return render();
     }
@@ -845,7 +858,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
     var f = ev.target; ev.preventDefault();
     if (f.id === "codeForm") {
       var code = String(new FormData(f).get("code") || "").trim(); if (!code) return;
-      state.sx.code = code; state.sx.error = ""; state.sx.sig = ""; lsSet("fuk-code", code); closeSheet(); sxLoad(); return;
+      state.sx.code = code; state.sx.error = ""; state.sx.sig = ""; state.sx.loaded = false; lsSet("fuk-code", code); closeSheet(); render(); sxLoad(); return;
     }
     if (!((f.id === "expForm" || f.id === "setForm") ? moneyGuard() : guard())) return;
     var d = new FormData(f), s = state.sheet || {};

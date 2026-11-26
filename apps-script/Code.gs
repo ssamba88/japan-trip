@@ -4,11 +4,13 @@
  * 시트 안에서 확장 프로그램 > Apps Script 를 열고 이 코드를 붙여 넣은 뒤 웹 앱으로 배포한다.
  * 설정 방법은 apps-script/설정방법.md 를 본다.
  *
- * 비밀번호는 코드에 적지 않고 "스크립트 속성"에 넣는다.
+ * 비밀번호는 코드에 적지 않고 "스크립트 속성"에 넣는다. (선택)
  *   EDIT_CODE : 편집 비밀번호 (비용 추가, 삭제, 설정 변경, 조회)
  *   VIEW_CODE : 보기 비밀번호 (조회만)
+ * 두 속성을 모두 만들지 않으면 비밀번호 없이 주소를 아는 누구나 보고 편집할 수 있다.
  */
 
+var MAX_EXPENSES = 500; // 시트가 비정상적으로 불어나는 것을 막는 상한
 var EXPENSE_HEADER = ["id", "ts", "title", "amount", "cur", "payer"];
 var SETTING_HEADER = ["key", "value"];
 var PAYERS = ["a", "b", "c"];
@@ -47,10 +49,12 @@ function doPost(e) {
 }
 
 function roleFor_(code) {
-  if (!code) return null;
   var p = PropertiesService.getScriptProperties();
   var edit = p.getProperty("EDIT_CODE");
   var view = p.getProperty("VIEW_CODE");
+  // 비밀번호(스크립트 속성)를 하나도 설정하지 않으면 주소를 아는 누구나 보고 편집할 수 있다.
+  if (!edit && !view) return "edit";
+  if (!code) return null;
   if (edit && code === edit) return "edit";
   if (view && code === view) return "view";
   return null;
@@ -105,6 +109,7 @@ function add_(x) {
   var sh = sheet_("expenses", EXPENSE_HEADER);
   var ids = sh.getRange(1, 1, sh.getLastRow(), 1).getValues();
   for (var i = 1; i < ids.length; i++) if (String(ids[i][0]) === id) return { ok: true, duplicate: true };
+  if (ids.length > MAX_EXPENSES) return { ok: false, error: "too_many" };
   sh.appendRow([id, ts, title, amount, cur, payer]);
   return { ok: true };
 }
