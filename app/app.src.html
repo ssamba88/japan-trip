@@ -150,7 +150,7 @@ svg.ic { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-wid
 
 /* forms */
 label { display: block; font-size: 14px; font-weight: 500; color: var(--ink); margin: 12px 0 4px; }
-input[type=text], input[type=number], input[type=date], select, textarea {
+input[type=text], input[type=number], input[type=date], input[type=password], select, textarea {
   width: 100%; min-height: 48px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink);
 }
 textarea { min-height: 88px; resize: vertical; }
@@ -288,6 +288,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
 
   /* 사진: 빌드 때 app/img의 이미지와 출처 정보가 들어온다 (Wikimedia Commons, CC 라이선스) */
   var IMG_DATA = /*IMAGES*/{};
+  /* 구글 시트 저장소(Apps Script 웹 앱 주소). 비어 있으면 시트 모드는 꺼진다. 빌드 때 app/sheet-url.txt가 들어온다 */
+  var SHEET_API = /*SHEETURL*/"";
   var ITEM_IMGS = { "d1-5": ["yufuin"], "d2-3": ["safari", "safari2"], "d2-7": ["yunotsubo"], "d3-3": ["dazaifu2"], "d3-6": ["canal"], "d4-2": ["zoo", "uminaka2"] };
   var CAPTIONS = {
     yufuin: "유후인 마을과 멀리 보이는 유후다케",
@@ -366,7 +368,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
   var state = {
     tab: "schedule", day: 0, edit: false, canWrite: false, db: null,
     days: {}, expenses: [], checks: {}, custom: [], res: {}, settings: { rate: 900, startDate: "" },
-    loaded: {}, ready: false, timedOut: false, dbNull: false, sheet: null, pending: {}, dirty: false
+    loaded: {}, ready: false, timedOut: false, dbNull: false, sheet: null, pending: {}, dirty: false,
+    mode: "artifact", sx: { code: "", role: null, error: "", sig: "" }
   };
   var TABS = [["schedule", "일정", "calendar"], ["map", "지도", "map"], ["money", "비용", "wallet"], ["booking", "예약", "ticket"], ["packing", "준비물", "check"]];
   var $main = document.getElementById("main");
@@ -417,13 +420,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
     if (state.edit) chips += '<span class="chip warn">편집 모드</span>';
     document.getElementById("chips").innerHTML = chips;
     var eb = document.getElementById("editBtn");
-    eb.hidden = !state.canWrite;
+    eb.hidden = !(state.canWrite || canSheetEdit());
     eb.setAttribute("aria-pressed", state.edit ? "true" : "false");
     eb.innerHTML = ic("pencil") + (state.edit ? "편집 끝내기" : "편집");
     document.getElementById("moreBtn").innerHTML = ic("menu") + "더보기";
     var n = document.getElementById("notice");
     var msg = "";
-    if (state.standalone) msg = "이 주소에서는 기본 일정만 보여요. 비용 정산과 수정은 공유 링크(Claude 아티팩트)에서 할 수 있어요.";
+    if (state.mode === "sheet") msg = state.sx.role ? "" : "비용 정산은 비밀번호를 입력하면 볼 수 있어요. 나머지는 기본 일정이에요.";
+    else if (state.standalone) msg = "이 주소에서는 기본 일정만 보여요. 비용 정산과 수정은 공유 링크(Claude 아티팩트)에서 할 수 있어요.";
     else if (state.dbNull) msg = "로그인하면 가족이 수정한 일정과 비용이 보여요. 지금은 기본 일정이에요.";
     else if (state.db && !state.ready && state.timedOut) msg = "공유된 수정 내용을 아직 불러오지 못했어요. 기본 일정을 보여드리고 있어요.";
     n.textContent = msg; n.hidden = !msg;
@@ -454,12 +458,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
         acts += '<a class="btn ghost sm" href="' + esc(mapView(it.place)) + '" target="_blank" rel="noopener">' + ic("pin") + "구글맵에서 보기</a>";
         acts += '<a class="btn ghost sm" href="' + esc(mapDir(it.place)) + '" target="_blank" rel="noopener">' + ic("nav") + "길안내</a>";
       }
-      if (state.edit) acts += '<button class="btn ghost sm" type="button" data-act="item-edit" data-idx="' + idx + '">' + ic("pencil") + "수정</button>";
+      if (state.edit && state.canWrite) acts += '<button class="btn ghost sm" type="button" data-act="item-edit" data-idx="' + idx + '">' + ic("pencil") + "수정</button>";
       if (acts) h += '<div class="actions">' + acts + "</div>";
       h += "</div></li>";
     });
     h += "</ol>";
-    if (state.edit) {
+    if (state.edit && state.canWrite) {
       h += '<div class="btnrow"><button class="btn" type="button" data-act="item-add">' + ic("plus") + '일정 추가</button><button class="btn ghost" type="button" data-act="day-reset">기본값으로 되돌리기</button></div>';
     }
     return h;
@@ -509,6 +513,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
     return { total: total, rows: rows, tx: tx };
   }
   function viewMoney() {
+    if (state.mode === "sheet" && !state.sx.role) {
+      return '<div class="card"><h2>비용 정산</h2><p class="note">비용은 구글 시트에 저장돼요. 가족에게 받은 비밀번호를 입력하면 볼 수 있어요.</p>' +
+        (state.sx.error ? '<p class="note" style="color:var(--warn)">' + esc(state.sx.error) + "</p>" : "") +
+        '<div class="btnrow"><button class="btn" type="button" data-act="code-open">비밀번호 입력</button></div></div>';
+    }
+    var canM = state.edit && canMoney();
     var s = settle();
     var h = '<div class="card"><p class="muted">총 지출 (원화 환산)</p><p class="big num">' + fmt(s.total) + '원</p><p class="muted">엔화는 100엔당 ' + fmt(rate()) + "원으로 계산해요. 8명을 인원수(3, 2, 3명)대로 나눠요.</p></div>";
     h += '<h2 class="sec-title">정산</h2><div class="card">';
@@ -521,15 +531,16 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
       s.tx.forEach(function (t) { h += '<div class="kv"><span>' + esc(t.from) + " → " + esc(t.to) + '</span><span class="num">' + fmt(t.v) + "원</span></div>"; });
       h += "</div>";
     }
-    h += '<div class="row sec-title"><h2>지출 내역</h2>' + (state.edit ? '<button class="btn sm" type="button" data-act="exp-add">' + ic("plus") + "추가</button>" : "") + "</div>";
-    if (!state.expenses.length) h += '<div class="card empty">아직 등록된 비용이 없어요.' + (state.canWrite ? " 편집 모드에서 추가할 수 있어요." : "") + "</div>";
+    h += '<div class="row sec-title"><h2>지출 내역</h2><div class="row" style="gap:8px">' + (state.mode === "sheet" ? '<button class="btn ghost sm" type="button" data-act="sx-refresh">새로고침</button>' : "") +
+      (canM ? '<button class="btn sm" type="button" data-act="exp-add">' + ic("plus") + "추가</button>" : "") + "</div></div>";
+    if (!state.expenses.length) h += '<div class="card empty">아직 등록된 비용이 없어요.' + (canMoney() ? " 편집 모드에서 추가할 수 있어요." : "") + "</div>";
     else {
       h += '<div class="card">';
       state.expenses.forEach(function (e) {
         var payer = HH.filter(function (g) { return g.k === e.payer; })[0];
         var amt = e.cur === "JPY" ? "¥" + fmt(e.amount) : fmt(e.amount) + "원";
         h += '<div class="kv"><div style="min-width:0"><b style="color:var(--ink);overflow-wrap:anywhere">' + esc(e.title) + '</b><div class="muted">' + esc(payer ? payer.name : "") + " 결제" + (e.cur === "JPY" ? " · 약 " + fmt(toKRW(e)) + "원" : "") + '</div></div><div class="row" style="gap:8px"><span class="num">' + amt + "</span>" +
-          (state.edit ? '<button class="icon-btn" type="button" aria-label="삭제" data-act="exp-del" data-id="' + esc(e.id) + '">' + ic("trash") + "</button>" : "") + "</div></div>";
+          (canM ? '<button class="icon-btn" type="button" aria-label="삭제" data-act="exp-del" data-id="' + esc(e.id) + '">' + ic("trash") + "</button>" : "") + "</div></div>";
       });
       h += "</div>";
     }
@@ -544,7 +555,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
       h += '<div class="card"><div class="row"><h3>' + esc(r.label) + '</h3><span class="chip ' + cls + '">' + esc(st) + '</span></div><p class="note">' + esc(r.desc) + "</p>";
       if (v.memo) h += '<p class="note" style="color:var(--ink)"><b>메모</b> ' + esc(v.memo) + "</p>";
       var acts = r.links.map(function (l) { return '<a class="btn ghost sm" href="' + esc(l[1]) + '" target="_blank" rel="noopener">' + ic("ext") + esc(l[0]) + "</a>"; }).join("");
-      if (state.edit) acts += '<button class="btn ghost sm" type="button" data-act="res-edit" data-key="' + r.key + '">' + ic("pencil") + "상태, 메모 수정</button>";
+      if (state.edit && state.canWrite) acts += '<button class="btn ghost sm" type="button" data-act="res-edit" data-key="' + r.key + '">' + ic("pencil") + "상태, 메모 수정</button>";
       h += '<div class="actions">' + acts + "</div></div>";
     });
     return h + "</div>";
@@ -568,26 +579,31 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
       h += '<h2 class="sec-title">' + esc(c.cat) + '</h2><div class="card">';
       c.items.forEach(function (i) {
         var on = !!state.checks[i.id];
-        h += '<div class="row" style="gap:0"><button class="check" type="button" role="checkbox" aria-checked="' + on + '" data-act="check" data-id="' + esc(i.id) + '"' + (state.edit ? "" : " disabled") + '><span class="box">' + (on ? ic("tick") : "") + '</span><span class="lbl">' + esc(i.text) + "</span></button>" +
-          (state.edit && i.custom ? '<button class="icon-btn" type="button" aria-label="삭제" data-act="pack-del" data-id="' + esc(i.id) + '">' + ic("trash") + "</button>" : "") + "</div>";
+        h += '<div class="row" style="gap:0"><button class="check" type="button" role="checkbox" aria-checked="' + on + '" data-act="check" data-id="' + esc(i.id) + '"' + (state.edit && state.canWrite ? "" : " disabled") + '><span class="box">' + (on ? ic("tick") : "") + '</span><span class="lbl">' + esc(i.text) + "</span></button>" +
+          (state.edit && state.canWrite && i.custom ? '<button class="icon-btn" type="button" aria-label="삭제" data-act="pack-del" data-id="' + esc(i.id) + '">' + ic("trash") + "</button>" : "") + "</div>";
       });
       h += "</div>";
     });
-    if (state.edit) h += '<div class="btnrow"><button class="btn" type="button" data-act="pack-add">' + ic("plus") + "준비물 추가</button></div>";
+    if (state.edit && state.canWrite) h += '<div class="btnrow"><button class="btn" type="button" data-act="pack-add">' + ic("plus") + "준비물 추가</button></div>";
     else if (!state.canWrite) h += '<p class="muted" style="margin-top:12px">체크는 여행을 관리하는 사람만 바꿀 수 있어요.</p>';
     return h;
   }
 
   function viewMore() {
     var h = "";
-    if (state.canWrite) {
+    if (state.mode === "sheet") {
+      h += '<div class="card"><h3>구글 시트 연결</h3><p class="muted">' + (state.sx.role === "edit" ? "편집 비밀번호로 로그인했어요." : state.sx.role === "view" ? "보기 비밀번호로 로그인했어요." : "아직 로그인하지 않았어요.") +
+        ' 비밀번호는 이 기기에만 저장돼요.</p><div class="btnrow"><button class="btn ghost sm" type="button" data-act="code-open">' + (state.sx.role ? "비밀번호 바꾸기" : "비밀번호 입력") + "</button>" +
+        (state.sx.code ? '<button class="btn ghost sm" type="button" data-act="code-clear">로그아웃</button>' : "") + "</div></div>";
+    }
+    if (canMoney()) {
       h += '<div class="card"><h3>여행 설정</h3><p class="muted">출발일을 넣으면 상단에 D-day가 보여요.</p><div class="btnrow"><button class="btn ghost sm" type="button" data-act="settings">' + ic("pencil") + "출발일 설정" + (state.settings.startDate ? " (" + esc(state.settings.startDate) + ")" : "") + "</button></div></div>";
     }
     h += '<h2 class="sec-title">날씨</h2><div class="card"><div class="kv"><span>후쿠오카 1월 하순 평년</span><span class="num">낮 약 10도 · 밤 약 3도</span></div><div class="kv"><span>유후인 (산간)</span><span class="num">후쿠오카보다 훨씬 춥고 눈, 결빙 가능</span></div><p class="muted">평년 기준의 대략적인 값이에요. 출발 일주일 전부터 예보를 확인하세요.</p><div class="actions"><a class="btn ghost sm" href="https://www.jma.go.jp/bosai/forecast/" target="_blank" rel="noopener">' + ic("ext") + '일본 기상청 예보</a><a class="btn ghost sm" href="https://tenki.jp/" target="_blank" rel="noopener">' + ic("ext") + "tenki.jp</a></div></div>";
     h += '<h2 class="sec-title">환율 계산기</h2><div class="card"><label for="rateIn">100엔당 원 (직접 입력)</label><input id="rateIn" type="number" inputmode="decimal" min="1" step="0.1" value="' + esc(rate()) + '">' +
       '<div class="grid2"><div><label for="jpyIn">엔 (JPY)</label><input id="jpyIn" type="number" inputmode="decimal" min="0" placeholder="10000"></div><div><label for="krwIn">원 (KRW)</label><input id="krwIn" type="number" inputmode="decimal" min="0" placeholder="90000"></div></div>' +
       '<p class="muted" style="margin-top:8px">기본 환율은 예시값이에요. 출발 전에 실제 환율로 바꿔 주세요.</p>' +
-      (state.canWrite ? '<div class="btnrow"><button class="btn ghost sm" type="button" data-act="rate-save">이 환율을 가족 기준으로 저장</button></div>' : "") + "</div>";
+      (canMoney() ? '<div class="btnrow"><button class="btn ghost sm" type="button" data-act="rate-save">이 환율을 가족 기준으로 저장</button></div>' : "") + "</div>";
     h += '<h2 class="sec-title">일본어 회화</h2><div class="card">' + PHRASES.map(function (p) {
       return '<div class="lang"><b>' + esc(p[0]) + '</b><span class="jp" lang="ja">' + esc(p[1]) + '</span><span class="muted">' + esc(p[2]) + "</span></div>";
     }).join("") + "</div>";
@@ -698,6 +714,59 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
     openSheet(sheetHead("출발일 설정") + '<form id="setForm"><label for="s-date">출발일</label><input id="s-date" name="startDate" type="date" value="' + esc(state.settings.startDate || "") + '"><p class="muted" style="margin-top:6px">비우면 D-day를 숨겨요.</p><div class="btnrow"><button class="btn" type="submit">저장</button><button class="btn ghost" type="button" data-act="close-sheet">취소</button></div></form>');
   }
 
+  /* ---------- google sheet (Apps Script) ---------- */
+  function canSheetEdit() { return state.mode === "sheet" && state.sx.role === "edit"; }
+  function canMoney() { return state.canWrite || canSheetEdit(); }
+  function moneyGuard() {
+    if (state.mode === "sheet") { if (!canSheetEdit()) { toast("편집 비밀번호로 로그인해야 해요."); return false; } return true; }
+    return guard();
+  }
+  function sxCall(payload) {
+    return fetch(SHEET_API, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(Object.assign({ code: state.sx.code }, payload)) })
+      .then(function (r) { return r.json(); });
+  }
+  function sxLoad() {
+    if (!state.sx.code) return Promise.resolve();
+    return sxCall({ action: "list" }).then(function (j) {
+      if (j && j.ok) {
+        state.sx.role = j.role; state.sx.error = "";
+        state.expenses = (j.expenses || []).map(function (e) {
+          return { id: String(e.id), ts: Number(e.ts) || 0, title: String(e.title), amount: Number(e.amount), cur: e.cur === "KRW" ? "KRW" : "JPY", payer: String(e.payer) };
+        }).sort(function (a, b) { return b.ts - a.ts; });
+        var st = j.settings || {};
+        if (Number(st.rate) > 0) state.settings.rate = Number(st.rate);
+        if (typeof st.startDate === "string") state.settings.startDate = st.startDate;
+        if (state.sx.role !== "edit") state.edit = false;
+      } else {
+        state.sx.role = null; state.edit = false;
+        if (j && j.error === "bad_code") { state.sx.error = "비밀번호가 맞지 않아요."; state.sx.code = ""; try { localStorage.removeItem("fuk-code"); } catch (e) {} }
+        else state.sx.error = "불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.";
+      }
+      var sig = JSON.stringify([state.sx.role, state.sx.error, state.expenses, state.settings]);
+      if (sig !== state.sx.sig) { state.sx.sig = sig; render(); }
+    }, function () {
+      if (!state.sx.role) { state.sx.error = "구글 시트에 연결하지 못했어요. 인터넷 연결을 확인해 주세요."; render(); }
+    });
+  }
+  function sxSave(payload, okMsg) {
+    return sxCall(payload).then(function (j) {
+      if (j && j.ok) { if (okMsg) toast(okMsg); } else toast(j && j.error === "not_allowed" ? "편집 권한이 없어요." : "저장하지 못했어요.");
+      return sxLoad();
+    }, function () { toast("저장하지 못했어요. 인터넷 연결을 확인해 주세요."); return sxLoad(); });
+  }
+  function startSheetMode() {
+    state.mode = "sheet";
+    var c = lsGet("fuk-code"); if (c) state.sx.code = c;
+    render(); sxLoad();
+    setInterval(function () { if (document.visibilityState === "visible" && state.sx.code && $sheet.hidden) sxLoad(); }, 30000);
+    document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible" && state.sx.code) sxLoad(); });
+  }
+  function codeSheet() {
+    state.sheet = { kind: "code" };
+    openSheet(sheetHead("비밀번호 입력") + '<form id="codeForm" autocomplete="off"><label for="c-code">가족 여행 비밀번호</label><input id="c-code" name="code" type="password" required autocomplete="off">' +
+      '<p class="muted" style="margin-top:6px">편집용과 보기용 비밀번호가 따로 있어요. 이 기기에만 저장돼요.</p><div class="btnrow"><button class="btn" type="submit">확인</button><button class="btn ghost" type="button" data-act="close-sheet">취소</button></div></form>');
+  }
+
   /* ---------- actions ---------- */
   function setTab(t) { state.tab = t; if (location.hash !== "#" + t) { try { history.replaceState(null, "", "#" + t); } catch (e) { location.hash = t; } } render(); window.scrollTo(0, 0); }
 
@@ -725,6 +794,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
     if (act === "pack-add") return packSheet();
     if (act === "pack-del") return confirmSheet("이 준비물을 삭제할까요?", "pack-del", { id: el.getAttribute("data-id") });
     if (act === "settings") return settingsSheet();
+    if (act === "code-open") return codeSheet();
+    if (act === "sx-refresh") { toast("불러오는 중이에요."); return void sxLoad(); }
+    if (act === "code-clear") {
+      state.sx.code = ""; state.sx.role = null; state.sx.error = ""; state.sx.sig = ""; state.expenses = []; state.edit = false;
+      try { localStorage.removeItem("fuk-code"); } catch (e) {}
+      toast("로그아웃했어요."); return render();
+    }
     if (act === "item-up" || act === "item-down") {
       if (!guard()) return;
       var di = state.day, list = items(di).slice(), i = state.sheet.idx, j = act === "item-up" ? i - 1 : i + 1;
@@ -741,26 +817,34 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
       return;
     }
     if (act === "rate-save") {
-      if (!guard()) return;
+      if (!moneyGuard()) return;
       var v = Number(document.getElementById("rateIn").value);
       if (!(v > 0)) return toast("환율을 숫자로 입력해 주세요.");
       state.settings.rate = v; render();
+      if (state.mode === "sheet") return void sxSave({ action: "settings", settings: { rate: v } }, "환율을 저장했어요.");
       state.db.doc("settings/main").set({ rate: v, startDate: state.settings.startDate || "" }).then(function () { toast("환율을 저장했어요."); }, failWrite);
       return;
     }
     if (act === "confirm-yes") {
-      var s = state.sheet; if (!s || !guard()) return closeSheet();
+      var s = state.sheet; if (!s || !(s.act === "exp-del" ? moneyGuard() : guard())) return closeSheet();
       closeSheet();
       if (s.act === "day-reset") { var d = state.day; delete state.days["d" + (d + 1)]; render(); state.db.doc("days/d" + (d + 1)).delete().catch(failWrite); }
       else if (s.act === "item-del") { var di2 = state.day, l2 = items(di2).filter(function (x) { return x.id !== s.extra.id; }); saveItems(di2, l2); }
-      else if (s.act === "exp-del") { state.expenses = state.expenses.filter(function (x) { return x.id !== s.extra.id; }); render(); state.db.doc("expenses/" + s.extra.id).delete().catch(failWrite); }
+      else if (s.act === "exp-del") {
+        state.expenses = state.expenses.filter(function (x) { return x.id !== s.extra.id; }); render();
+        if (state.mode === "sheet") sxSave({ action: "delete", id: s.extra.id }); else state.db.doc("expenses/" + s.extra.id).delete().catch(failWrite);
+      }
       else if (s.act === "pack-del") { state.custom = state.custom.filter(function (x) { return x.id !== s.extra.id; }); render(); state.db.doc("checkitems/" + s.extra.id).delete().catch(failWrite); state.db.doc("checks/" + s.extra.id).delete().catch(function () {}); }
     }
   });
 
   document.addEventListener("submit", function (ev) {
     var f = ev.target; ev.preventDefault();
-    if (!guard()) return;
+    if (f.id === "codeForm") {
+      var code = String(new FormData(f).get("code") || "").trim(); if (!code) return;
+      state.sx.code = code; state.sx.error = ""; state.sx.sig = ""; lsSet("fuk-code", code); closeSheet(); sxLoad(); return;
+    }
+    if (!((f.id === "expForm" || f.id === "setForm") ? moneyGuard() : guard())) return;
     var d = new FormData(f), s = state.sheet || {};
     if (f.id === "itemForm") {
       var di = state.day, list = items(di).slice();
@@ -773,9 +857,15 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
       if (!(amount >= 0) || !isFinite(amount)) return toast("금액을 숫자로 입력해 주세요.");
       var e = { title: String(d.get("title") || "").trim(), amount: amount, cur: d.get("cur") === "KRW" ? "KRW" : "JPY", payer: String(d.get("payer")), ts: Date.now() };
       if (!e.title) return toast("항목을 입력해 주세요.");
-      var ref = state.db.collection("expenses").doc();
-      state.expenses = [Object.assign({ id: ref.id }, e)].concat(state.expenses); closeSheet(); render();
-      ref.set(e).catch(failWrite);
+      if (state.mode === "sheet") {
+        var ex = Object.assign({ id: uid() }, e);
+        state.expenses = [ex].concat(state.expenses); closeSheet(); render();
+        sxSave({ action: "add", expense: ex });
+      } else {
+        var ref = state.db.collection("expenses").doc();
+        state.expenses = [Object.assign({ id: ref.id }, e)].concat(state.expenses); closeSheet(); render();
+        ref.set(e).catch(failWrite);
+      }
     } else if (f.id === "resForm") {
       var rv = { status: String(d.get("status")), memo: String(d.get("memo") || "").trim() };
       state.res[s.key] = rv; closeSheet(); render();
@@ -787,7 +877,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
       pref.set(pv).catch(failWrite);
     } else if (f.id === "setForm") {
       var sd = String(d.get("startDate") || ""); state.settings.startDate = sd; closeSheet(); render();
-      state.db.doc("settings/main").set({ rate: state.settings.rate, startDate: sd }).catch(failWrite);
+      if (state.mode === "sheet") sxSave({ action: "settings", settings: { startDate: sd } });
+      else state.db.doc("settings/main").set({ rate: state.settings.rate, startDate: sd }).catch(failWrite);
     }
   });
 
@@ -824,7 +915,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
 
   (async function () {
     var claude = window.claude;
-    if (!claude || !claude.use) { state.dbNull = true; state.standalone = true; render(); return; }
+    if (!claude || !claude.use) {
+      if (SHEET_API) { startSheetMode(); return; }
+      state.dbNull = true; state.standalone = true; render(); return;
+    }
     var db = null, user = null;
     try { db = await claude.use("db"); } catch (e) { db = null; }
     try { user = await claude.use("user"); } catch (e) { user = null; }

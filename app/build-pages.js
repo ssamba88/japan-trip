@@ -38,9 +38,17 @@ const imgJson = JSON.stringify(imgData).replace(/</g, "\\u003c");
 const artifact = src.replace("/*FONTS*/", fontCss).replace("/*IMAGES*/{}", imgJson);
 fs.writeFileSync(path.join(__dirname, "index.html"), artifact);
 
+// GitHub Pages 버전에만 구글 시트(Apps Script) 주소를 넣는다. 아티팩트는 자체 공유 저장소를 쓴다.
+let sheetUrl = "";
+const urlFile = path.join(__dirname, "sheet-url.txt");
+if (fs.existsSync(urlFile)) sheetUrl = fs.readFileSync(urlFile, "utf8").trim();
+if (sheetUrl && !/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(sheetUrl)) {
+  throw new Error("app/sheet-url.txt 의 주소 형식이 올바르지 않아요: " + sheetUrl);
+}
+
 const titleMatch = artifact.match(/<title>[\s\S]*?<\/title>/);
 const title = titleMatch ? titleMatch[0] : "<title>후쿠오카 가족여행</title>";
-const body = artifact.replace(title, "");
+const body = artifact.replace(title, "").replace('/*SHEETURL*/""', JSON.stringify(sheetUrl));
 const page =
   '<!doctype html>\n<html lang="ko">\n<head>\n<meta charset="utf-8">\n' +
   '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">\n' +

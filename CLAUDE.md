@@ -65,4 +65,12 @@
 - [x] 지도 방식 결정: 구글맵 링크 방식 (카카오맵과 한국 관광·축제 MCP는 일본 여행에 맞지 않아 사용하지 않음)
 - [ ] MCP 설정 (필요한 도구가 있을 때만 PlayMCP 등 연결)
 - [x] 가족여행 웹앱 1차 제작: `app/index.html`, 아티팩트 https://claude.ai/artifact/Qw5q2vBktWrhypj41PTEjH (공유 저장 `db` 사용, 편집은 쓰기 권한자만)
+- [x] 웹앱 폰트(Paperlogy)와 일정별 사진(Wikimedia Commons CC) 반영, GitHub Pages(`docs/`) 배포
+- [ ] 구글 시트 저장소(Pages에서 비용 공유 편집): `apps-script/Code.gs` 작성 완료, 배포 후 URL을 `app/sheet-url.txt`에 넣고 빌드 (방법은 `apps-script/설정방법.md`)
 - [ ] 웹앱 보완 (실제 사용 후 피드백 반영, 일정과 예약 확정 내용 갱신)
+
+## 웹앱 빌드 구조
+
+- 소스는 `app/app.src.html` 하나만 고친다. `node app/build-pages.js`로 `app/index.html`(아티팩트용)과 `docs/index.html`(GitHub Pages용)을 만든다
+- 아티팩트는 Claude 공유 저장소(`db`)에, Pages는 구글 시트(`app/sheet-url.txt`)에 비용을 저장한다. 두 저장소는 서로 데이터가 섞이지 않는다
+- 사진은 `app/img/`와 `_meta.json`(출처), 폰트는 `font/woff2/`에서 가져와 페이지에 내장한다
