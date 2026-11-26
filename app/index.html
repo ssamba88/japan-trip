@@ -395,7 +395,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
     document.getElementById("moreBtn").innerHTML = ic("menu") + "더보기";
     var n = document.getElementById("notice");
     var msg = "";
-    if (state.dbNull) msg = "로그인하면 가족이 수정한 일정과 비용이 보여요. 지금은 기본 일정이에요.";
+    if (state.standalone) msg = "이 주소에서는 기본 일정만 보여요. 비용 정산과 수정은 공유 링크(Claude 아티팩트)에서 할 수 있어요.";
+    else if (state.dbNull) msg = "로그인하면 가족이 수정한 일정과 비용이 보여요. 지금은 기본 일정이에요.";
     else if (state.db && !state.ready && state.timedOut) msg = "공유된 수정 내용을 아직 불러오지 못했어요. 기본 일정을 보여드리고 있어요.";
     n.textContent = msg; n.hidden = !msg;
     document.getElementById("tabs").innerHTML = TABS.map(function (t) {
@@ -772,7 +773,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
 
   (async function () {
     var claude = window.claude;
-    if (!claude || !claude.use) { state.dbNull = true; render(); return; }
+    if (!claude || !claude.use) { state.dbNull = true; state.standalone = true; render(); return; }
     var db = null, user = null;
     try { db = await claude.use("db"); } catch (e) { db = null; }
     try { user = await claude.use("user"); } catch (e) { user = null; }
